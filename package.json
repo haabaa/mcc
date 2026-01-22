@@ -1,0 +1,12 @@
+{
+  "name": "fx-pos",
+  "private": true,
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w apps/api & npm run dev -w apps/web",
+    "db:migrate": "npm run prisma:migrate -w apps/api",
+    "db:studio": "npm run prisma:studio -w apps/api"
+  }
+}
