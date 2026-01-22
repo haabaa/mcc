@@ -1,0 +1,193 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  STAFF
+}
+
+enum TxType {
+  BUY
+  SELL
+}
+
+enum TxStatus {
+  POSTED
+  VOIDED
+}
+
+enum Channel {
+  CASH
+  BANK_TRANSFER
+  MIXED
+}
+
+enum Direction {
+  IN
+  OUT
+}
+
+enum PaymentMethod {
+  CASH
+  BANK_TRANSFER
+}
+
+model User {
+  id           String   @id @default(uuid())
+  username     String   @unique
+  passwordHash String
+  role         Role     @default(STAFF)
+  fullName     String?
+  isActive     Boolean  @default(true)
+  tokenVersion Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  rateSnapshots RateSnapshot[] @relation("RateCreatedBy")
+  transactions  Transaction[]  @relation("TxCashier")
+  voidedTxs     Transaction[]  @relation("TxVoidedBy")
+  auditEvents   AuditEvent[]   @relation("AuditActor")
+}
+
+model Currency {
+  code      String  @id @db.Char(3)
+  name      String
+  symbol    String?
+  decimals  Int     @default(2)
+  isActive  Boolean @default(true)
+
+  rateSnapshots     RateSnapshot[] @relation("RateCurrency")
+  legs              TransactionLeg[]
+  inventoryBalance  InventoryBalance?
+  inventoryMovements InventoryMovement[]
+}
+
+model RateSnapshot {
+  id               String   @id @default(uuid())
+  currencyCode     String   @db.Char(3)
+  baseCurrencyCode String   @db.Char(3)
+  buyRate          Decimal  @db.Numeric(18, 8)
+  sellRate         Decimal  @db.Numeric(18, 8)
+  effectiveAt      DateTime
+  notes            String?
+  createdAt        DateTime @default(now())
+
+  createdById String
+  createdBy   User @relation("RateCreatedBy", fields: [createdById], references: [id])
+
+  currency Currency @relation("RateCurrency", fields: [currencyCode], references: [code])
+
+  @@index([currencyCode, effectiveAt])
+}
+
+model Transaction {
+  id             String   @id @default(uuid())
+  type           TxType
+  status         TxStatus @default(POSTED)
+  channel        Channel
+  customerName   String?
+  customerNid    String?
+  customerMobile String?
+  memo           String?
+  createdAt      DateTime @default(now())
+  voidedAt       DateTime?
+  voidReason     String?
+
+  cashierId String
+  cashier   User @relation("TxCashier", fields: [cashierId], references: [id])
+
+  voidedById String?
+  voidedBy   User? @relation("TxVoidedBy", fields: [voidedById], references: [id])
+
+  rateSnapshotId String?
+  rateSnapshot   RateSnapshot? @relation(fields: [rateSnapshotId], references: [id])
+
+  legs      TransactionLeg[]
+  payments  Payment[]
+  movements InventoryMovement[]
+
+  @@index([createdAt])
+  @@index([type])
+  @@index([status])
+}
+
+model TransactionLeg {
+  id            String     @id @default(uuid())
+  transactionId String
+  transaction   Transaction @relation(fields: [transactionId], references: [id])
+
+  currencyCode  String   @db.Char(3)
+  currency      Currency @relation(fields: [currencyCode], references: [code])
+
+  direction     Direction
+  amount        Decimal  @db.Numeric(18, 6)
+  rateUsed      Decimal? @db.Numeric(18, 8)
+  valueInBase   Decimal  @db.Numeric(18, 2)
+  createdAt     DateTime @default(now())
+
+  @@index([transactionId])
+  @@index([currencyCode])
+}
+
+model Payment {
+  id            String @id @default(uuid())
+  transactionId String
+  transaction   Transaction @relation(fields: [transactionId], references: [id])
+
+  method      PaymentMethod
+  amountBase  Decimal @db.Numeric(18, 2)
+  bankName    String?
+  bankAccount String?
+  bankRef     String?
+  receivedAt  DateTime @default(now())
+  notes       String?
+
+  @@index([transactionId])
+}
+
+model InventoryBalance {
+  currencyCode  String  @id @db.Char(3)
+  currency      Currency @relation(fields: [currencyCode], references: [code])
+
+  onHand        Decimal @db.Numeric(18, 6) @default(0)
+  avgCostInBase Decimal @db.Numeric(18, 8) @default(0)
+  updatedAt     DateTime @updatedAt
+}
+
+model InventoryMovement {
+  id            String @id @default(uuid())
+  currencyCode  String @db.Char(3)
+  currency      Currency @relation(fields: [currencyCode], references: [code])
+
+  transactionId String
+  transaction   Transaction @relation(fields: [transactionId], references: [id])
+
+  deltaAmount   Decimal @db.Numeric(18, 6)
+  costBasisRate Decimal? @db.Numeric(18, 8)
+  deltaCostBase Decimal @db.Numeric(18, 2)
+  createdAt     DateTime @default(now())
+
+  @@index([currencyCode, createdAt])
+  @@index([transactionId])
+}
+
+model AuditEvent {
+  id         String  @id @default(uuid())
+  actorId    String
+  actor      User    @relation("AuditActor", fields: [actorId], references: [id])
+
+  action     String
+  entityType String
+  entityId   String
+  metadata   Json?
+  createdAt  DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([entityType, entityId])
+}
